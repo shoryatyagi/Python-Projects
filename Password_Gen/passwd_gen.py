@@ -3,6 +3,9 @@ import string
 import pyperclip
 import pickle
 import flet as ft
+import csv
+from flet import TemplateRoute
+from io import StringIO
 
 # Global variable to store saved passwords
 saved_passwords = []
@@ -28,6 +31,7 @@ def check_password_strength(password):
         return "Moderate"
     return "Strong"
 
+# Generate password page
 def password_generator_page(page: ft.Page):
     page.title = "Password Generator"
     page.horizontal_alignment = "center"
@@ -45,10 +49,6 @@ def password_generator_page(page: ft.Page):
     global saved_passwords
     saved_passwords = load_passwords()
     print("Loaded passwords:", saved_passwords)  # Debugging output
-
-    # Define TextField for update dialog
-    update_username_input = ft.TextField(label="Username", border_radius=20, width=300)
-    update_password_input = ft.TextField(label="Password", border_radius=20, width=300, password=True)
 
     # Function to generate a password
     def passwd(e):
@@ -72,12 +72,18 @@ def password_generator_page(page: ft.Page):
             password += random.choice(characters)
 
         update_password_visibility()
-
-        strength_label.value = f"Strength: {check_password_strength(password)}"
+        strength = check_password_strength(password)
+        strength_label.value = f"Strength: {strength}"
         strength_label.visible = True
-
+        if strength == "Strong":
+            strength_label.color = "green"
+        elif strength == "Moderate":
+            strength_label.color = "orange"
+            
+        else:
+            strength_label.color = "red"
         passwd_con.visible = True
-        copy_btn.visible = True
+        
         page.update()
 
     # Copy password to clipboard
@@ -92,9 +98,9 @@ def password_generator_page(page: ft.Page):
     # Update password visibility based on the toggle state
     def update_password_visibility():
         if show_password.value:
-            passwd_con.content = ft.Text(value=password)
+            passwd_con.content = ft.Text(value=password,color="white")
         else:
-            passwd_con.content = ft.Text(value="*" * len(password))
+            passwd_con.content = ft.Text(value="*" * len(password),color="white")
         page.update()
 
     # Toggle password visibility
@@ -113,79 +119,28 @@ def password_generator_page(page: ft.Page):
             user_input.value = ""
             page.update()
 
-    # Export saved passwords
-    def export_passwords(e):
-        export_text = "\n".join([f"Username: {username}, Password: {password}" for username, password in saved_passwords])
-        pyperclip.copy(export_text)
-
-    # Show update dialog
-    def show_update_dialog(username, current_password):
-        def update_password(e):
-            if update_username_input.value and update_password_input.value:
-                global saved_passwords
-                for i, (user, pwd) in enumerate(saved_passwords):
-                    if user == username:
-                        saved_passwords[i] = (update_username_input.value, update_password_input.value)
-                        break
-                save_passwords()  # Save to file
-                print("Updated passwords:", saved_passwords)  # Debugging output
-                update_password_table()
-                setattr(update_dialog, 'visible', False)
-                page.update()
-
-        update_username_input.value = username
-        update_password_input.value = current_password
-
-        update_dialog = ft.AlertDialog(
-            title="Update Password",
-            content=ft.Column(
-                controls=[
-                    update_username_input,
-                    update_password_input,
-                    ft.Row(
-                        controls=[
-                            ft.ElevatedButton(text="Update", on_click=update_password),
-                            ft.ElevatedButton(text="Cancel", on_click=lambda e: (setattr(update_dialog, 'visible', False), page.update()))
-                        ],
-                        spacing=10,
-                        alignment="center"
-                    )
-                ],
-                spacing=10
-            ),
-            actions=[
-                ft.ElevatedButton(text="Close", on_click=lambda e: (setattr(update_dialog, 'visible', False), page.update()))
-            ]
-        )
-
-        page.open(update_dialog)
-
-    # Show delete dialog
-    def show_delete_dialog(username):
-        def delete_password(e):
-            nonlocal username
-            global saved_passwords
-            saved_passwords = [entry for entry in saved_passwords if entry[0] != username]
-            save_passwords()  # Save to file
-            print("Deleted passwords:", saved_passwords)  # Debugging output
-            update_password_table()
-            setattr(delete_dialog, 'visible', False)
-            page.update()
-
-        delete_dialog = ft.AlertDialog(
-            title="Delete Password",
-            content=ft.Text(f"Are you sure you want to delete the password for username: {username}?"),
-            actions=[
-                ft.ElevatedButton(text="Yes", on_click=delete_password),
-                ft.ElevatedButton(text="No", on_click=lambda e: (setattr(delete_dialog, 'visible', False), page.update()))
-            ]
-        )
-
-        page.open(delete_dialog)
+    # Export saved passwords to CSV
+    def export_passwords_csv(e):
+        if not saved_passwords:
+            page.add(ft.Snackbar(text="No passwords to export!"))
+            return
+        
+        csv_output = StringIO()
+        csv_writer = csv.writer(csv_output)
+        csv_writer.writerow(["Username", "Password"])
+        csv_writer.writerows(saved_passwords)
+        
+        # Save CSV data to file
+        csv_filename = "passwords_export.csv"
+        with open(csv_filename, "w", newline="") as csv_file:
+            csv_file.write(csv_output.getvalue())
+        
+        page.add(ft.SnackBar(ft.Text(f"Passwords exported to {csv_filename}!")))
 
     # Update the table with saved passwords
     def update_password_table():
         data_table.rows = []
+        saved_passwords.reverse()
         filtered_passwords = [entry for entry in saved_passwords if search_input.value.lower() in entry[0].lower()]
         for username, password in filtered_passwords:
             data_table.rows.append(
@@ -193,13 +148,6 @@ def password_generator_page(page: ft.Page):
                     cells=[
                         ft.DataCell(ft.Text(username)),
                         ft.DataCell(ft.Text(password)),
-                        ft.DataCell(ft.Row(
-                            controls=[
-                                ft.IconButton(icon=ft.icons.EDIT, on_click=lambda e, u=username, p=password: show_update_dialog(u, p)),
-                                ft.IconButton(icon=ft.icons.DELETE, on_click=lambda e, u=username: show_delete_dialog(u)),
-                                ft.IconButton(icon=ft.icons.COPY, on_click=lambda e, p=password: pyperclip.copy(p))
-                            ]
-                        ))
                     ]
                 )
             )
@@ -226,15 +174,18 @@ def password_generator_page(page: ft.Page):
     save_button = ft.ElevatedButton(text="Save Password", on_click=save_password)
 
     passwd_con = ft.Container(
-        content=ft.Text(value="", color="white", text_align="center", selectable=True, size=20),
+        content=ft.Row(
+            controls=[
+                ft.Text(value="", color="white", text_align="center", selectable=True, size=20),
+                ft.ElevatedButton(text="Copy", bgcolor="blue", color="white", on_click=copy)
+            ]
+        ),
         padding=20,
         margin=0,
         visible=False,
         bgcolor="blue",
         border_radius=20
     )
-
-    copy_btn = ft.ElevatedButton(text="Copy", bgcolor="blue", color="white", on_click=copy, visible=False)
 
     strength_label = ft.Text(value="", color="white", size=15, visible=False)
 
@@ -244,20 +195,30 @@ def password_generator_page(page: ft.Page):
 
     # Search and Table Column
     search_input = ft.TextField(label="Search", border_radius=20, width=300, on_change=search_passwords)
-    export_btn = ft.ElevatedButton(text="Export", on_click=export_passwords)
+    export_btn_csv = ft.ElevatedButton(text="Export to CSV", on_click=export_passwords_csv)
+    
+    # New button to redirect to /login
+    new_user_button = ft.ElevatedButton(text="Add New User", on_click=lambda _: page.go("/login"))
 
     data_table = ft.DataTable(
         columns=[
             ft.DataColumn(ft.Text("Username")),
             ft.DataColumn(ft.Text("Password")),
-            ft.DataColumn(ft.Text("Actions"))
         ],
         rows=[],
         width=500,
         height=300,
         border_radius=10,
-        
     )
+    
+    lv = ft.ListView(
+        expand=True,
+        height=400,  # Fixed height for the ListView
+        spacing=10,
+        padding=20,
+        auto_scroll=True
+    )
+    lv.controls.append(data_table)
 
     # Layout Containers
     functionalities_container = ft.Container(
@@ -278,10 +239,10 @@ def password_generator_page(page: ft.Page):
                     alignment="start"
                 ),
                 passwd_con,
-                copy_btn,
                 strength_label,
                 show_password,
-                theme_toggle
+                theme_toggle,
+                new_user_button
             ],
             spacing=10,
             alignment="center"
@@ -293,29 +254,25 @@ def password_generator_page(page: ft.Page):
     search_save_table_container = ft.Container(
         content=ft.Column(
             controls=[
-                ft.Column(
+                ft.Row(
                     controls=[
-                        ft.Row(
-                            controls=[
-                                search_input,
-                                export_btn
-                            ],
-                            spacing=10,
-                            alignment="center"
-                        )
-                    ]
+                        search_input,
+                        export_btn_csv
+                    ],
+                    spacing=10,
+                    alignment="center"
                 ),
                 ft.Column(
-                    controls=[
-                        data_table
-                    ]
+                    controls=[lv],
+                    scroll=ft.ScrollMode.ALWAYS,
+                    height=400
                 )
             ],
             horizontal_alignment="left",
             spacing=10
         ),
         padding=ft.Padding(left=20, right=20, top=10, bottom=10),
-        width=450
+        width=550,
     )
 
     main_row = ft.Row(
@@ -326,7 +283,8 @@ def password_generator_page(page: ft.Page):
         spacing=40,
         alignment="start"
     )
-
+    
+    global full_height_container
     full_height_container = ft.Container(
         content=main_row,
         height=page.window_height,
@@ -336,9 +294,67 @@ def password_generator_page(page: ft.Page):
         expand=True
     )
 
-    page.add(full_height_container)
-
     # Call to update the table on startup
     update_password_table()
+
+    # Route handling
+    def view_pop(view):
+        page.views.pop()
+        top_view = page.views[-1]
+        page.go(top_view.route)
+
+    def route_change(route):
+        page.views.clear()
+        if page.route == "/login":
+            page.views.append(
+                ft.View(
+                    "/login",
+                    controls=[login_page()]
+                )
+            )
+        else:
+            page.views.append(
+                ft.View(
+                    "/",
+                    controls=[full_height_container]
+                )
+            )
+
+    def login_page():
+        def save_new_password(e):
+            new_username = new_username_input.value
+            new_password = new_password_input.value
+            if new_username and new_password:
+                saved_passwords.append((new_username, new_password))
+                save_passwords()
+                new_username_input.value = ""
+                new_password_input.value = ""
+                print("New user added:", (new_username, new_password))  # Debugging output
+                page.go("/")
+                update_password_table()
+        
+        headline = ft.Text(value="Add New User", font_family="Roboto", size=30, text_align="center", weight="bold")
+        new_username_input = ft.TextField(label="New Username", border_radius=20, width=300)
+        new_password_input = ft.TextField(label="New Password", border_radius=20, width=300)
+        save_new_user_button = ft.ElevatedButton(text="Save New User", on_click=save_new_password)
+        go_back_button = ft.ElevatedButton(text="Go Back", on_click= lambda _:page.go("/"))
+
+        return ft.Column(
+            controls=[
+                headline,
+                new_username_input,
+                new_password_input,
+                save_new_user_button,
+                go_back_button
+            ],
+            alignment=ft.alignment.center,
+            expand=True,
+            
+            spacing=20
+        )
+
+    page.on_route_change = route_change
+    page.on_view_pop = view_pop
+    page.go(page.route)
 
 ft.app(target=password_generator_page)
